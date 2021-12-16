@@ -1,2 +1,6 @@
 # atrioc-ad-split
-Determines revenue cut for Atrioc's editors
+Calculates ad revenue cut for Atrioc's editors
+
+<br>
+
+![here comes the money](./icon.png)
