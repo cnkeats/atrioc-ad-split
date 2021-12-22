@@ -117,23 +117,47 @@ df['Link'] = df['Id'].apply(lambda x: 'https://www.youtube.com/watch?v={0}'.form
 df['Editor Cut'] = df['Estimated Ad Revenue'].apply(lambda x: x / 10)
 
 output = df[['Title', 'Link', 'Estimated Ad Revenue', 'Editor Cut']].copy()
+output['Editor'] = ''
 output.drop_duplicates(inplace=True)
 
 summary = pd.DataFrame(columns=['Editor', 'Editor Cut'])
 editors = ['Quack', 'Krohnos']
 summary['Editor'] = editors
-#summary['Editor Cut'] = '=SUMIF(\'Video List\'!$E:$E, $A{0}, \'Video List\'!$D:$D)'
 summary['Editor Cut'] = summary['Editor Cut'].index+2
 summary['Editor Cut'] = summary['Editor Cut'].apply(lambda x: "=SUMIF('Video List'!$E:E, $A{0}, 'Video List'!$D:$D)".format(x))
-#'Video List\'!$E:$E, $A{0}, \'Video List\'!$D:$D)'
 
 
 writer = pd.ExcelWriter('output.xlsx', engine='xlsxwriter')
+centered_format = writer.book.add_format({'align': 'center', 'valign': 'vcenter'})
 
 summary.to_excel(writer, sheet_name='Summary', index=False)
+worksheet = writer.sheets['Summary']
+worksheet.set_column('A:A', 20, centered_format)
+worksheet.set_column('B:B', 20, centered_format)
+
+
 output.to_excel(writer, sheet_name='Video List', index=False)
+worksheet = writer.sheets['Video List']
+
+for index, column in enumerate(output.columns):
+    #worksheet.set_column(index, index, 20, centered_format)
+    series = output[column]
+    max_length = max((
+        series.astype(str).map(len).max(),  # len of largest item
+        len(str(series.name))  # len of column name/header
+    ))
+    if index == 1:
+        max_length += 2
+    if index == 0:
+        worksheet.set_column(index, index, max_length, centered_format)
+    else:    
+        worksheet.set_column(index, index, max_length)
+
+#worksheet.set_column(0, 0, 50, centered_format)
+
+
+#summary.to_excel(writer, sheet_name='Summary', index=False)
+#output.to_excel(writer, sheet_name='Video List', index=False)
 
 writer.save()
 
-print(output)
-print(summary)
