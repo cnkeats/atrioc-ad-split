@@ -2,6 +2,8 @@
 
 
 
+from os import write
+import numpy
 import pandas as pd
 import re
 import json
@@ -22,7 +24,7 @@ API_SERVICE_NAME = 'youtubereporting'
 API_VERSION = 'v1'
 
 endpoint = 'https://www.googleapis.com/youtube/v3/playlists'
-channelId = ''
+channelId = 'UUgv4dPk_qZNAbUW9WkuLPSA'
 parts = ','.join([
     'id'
 ])
@@ -37,7 +39,6 @@ params = {
 }
 
 response = requests.get(endpoint, params=params, headers=auth).json()
-#print(json.dumps(response, indent=2))
 
 playlistId = response['items'][0]['id']
 
@@ -62,23 +63,16 @@ while morePages:
 
     response = requests.get(endpoint, params=params, headers=auth).json()
 
-    #print(json.dumps(response, indent=2))
-    
     video = {}
     for item in response['items']:
 
         video = {
             'Id': item['snippet']['resourceId']['videoId'],
             'Title': item['snippet']['title'],
-            'Published At': item['snippet']['publishedAt'],
-            #'description': item['snippet']['description']
+            'Published At': item['snippet']['publishedAt']
         }
 
-        #print(video)
-        #input()
-
         videos.append(video)
-        #[print(video['title']) for video in videos]
 
     if 'nextPageToken' in response.keys():
         params['pageToken'] = response['nextPageToken']
@@ -87,13 +81,12 @@ while morePages:
         morePages = False
 
 endpoint = 'https://youtubeanalytics.googleapis.com/v2/reports'
-channelId = ''
+channelId = 'UCgv4dPk_qZNAbUW9WkuLPSA'
 
 metrics = [
     'views',
     'estimatedAdRevenue'
 ]
-
 
 chunkedVideos = [videos[i:i+200] for i in range(0, len(videos), 200)]
 
@@ -102,8 +95,8 @@ for chunk in chunkedVideos:
         'ids': 'channel=={0}'.format(channelId),
         'metrics': ','.join(metrics),
         'dimensions': 'video',
-        'startDate': '2021-10-01',
-        'endDate': '2021-10-31',
+        'startDate': '2021-12-01',
+        'endDate': '2021-12-31',
         'filters': 'video=={0}'.format(','.join([video['Id'] for video in chunk])),
     }
 
@@ -121,9 +114,26 @@ for chunk in chunkedVideos:
 
 df = pd.DataFrame(videos)
 df['Link'] = df['Id'].apply(lambda x: 'https://www.youtube.com/watch?v={0}'.format(x))
+df['Editor Cut'] = df['Estimated Ad Revenue'].apply(lambda x: x / 10)
 
-output = df[['Title', 'Link', 'Estimated Ad Revenue']].copy()
+output = df[['Title', 'Link', 'Estimated Ad Revenue', 'Editor Cut']].copy()
+output.drop_duplicates(inplace=True)
 
-path = 'output.xlsx'
+summary = pd.DataFrame(columns=['Editor', 'Editor Cut'])
+editors = ['Quack', 'Krohnos']
+summary['Editor'] = editors
+#summary['Editor Cut'] = '=SUMIF(\'Video List\'!$E:$E, $A{0}, \'Video List\'!$D:$D)'
+summary['Editor Cut'] = summary['Editor Cut'].index+2
+summary['Editor Cut'] = summary['Editor Cut'].apply(lambda x: "=SUMIF('Video List'!$E:E, $A{0}, 'Video List'!$D:$D)".format(x))
+#'Video List\'!$E:$E, $A{0}, \'Video List\'!$D:$D)'
 
-output.to_excel(path, index=False)
+
+writer = pd.ExcelWriter('output.xlsx', engine='xlsxwriter')
+
+summary.to_excel(writer, sheet_name='Summary', index=False)
+output.to_excel(writer, sheet_name='Video List', index=False)
+
+writer.save()
+
+print(output)
+print(summary)
