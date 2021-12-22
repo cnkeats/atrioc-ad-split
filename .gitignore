@@ -129,3 +129,9 @@ dmypy.json
 .pyre/
 
 *.xcf
+
+client_secret.json
+
+client_secret_web.json
+
+*.xlsx
