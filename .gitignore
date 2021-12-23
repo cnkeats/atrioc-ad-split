@@ -135,3 +135,6 @@ client_secret.json
 client_secret_web.json
 
 *.xlsx
+
+*token.json
+credentials.json

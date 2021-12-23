@@ -2,45 +2,38 @@
 
 
 
-from os import write
-import numpy
+import uploader
 import pandas as pd
-import re
-import json
-import requests
-import argparse
-from google_auth_oauthlib.flow import InstalledAppFlow
+import datetime
+from os import path
 from googleapiclient.discovery import build
-import configparser
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 
-config = configparser.ConfigParser()
-config.read_file(open('config.cfg'))
-token = config.get('Tokens', 'Bearer')
+SCOPES = [
+    'https://www.googleapis.com/auth/yt-analytics-monetary.readonly',
+    'https://www.googleapis.com/auth/youtube',
+    'https://www.googleapis.com/auth/yt-analytics.readonly'
+]
+creds = None
 
-CLIENT_SECRETS_FILE = 'client_secret.json'
+if path.exists('download_token.json'):
+    creds = Credentials.from_authorized_user_file('download_token.json', SCOPES)
 
+if not creds or not creds.valid:
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    else:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'credentials.json', SCOPES)
+        #creds = flow.run_local_server(port=0)
+        creds = flow.run_console()
+    # Save the credentials for the next run
+    with open('download_token.json', 'w') as token:
+        token.write(creds.to_json())
 
-API_SERVICE_NAME = 'youtubereporting'
-API_VERSION = 'v1'
-
-endpoint = 'https://www.googleapis.com/youtube/v3/playlists'
-channelId = 'UUgv4dPk_qZNAbUW9WkuLPSA'
-parts = ','.join([
-    'id'
-])
-
-auth = {
-    'Authorization': 'Bearer {0}'.format(token)
-}
-
-params = {
-    'id' : channelId,
-    'part': parts
-}
-
-response = requests.get(endpoint, params=params, headers=auth).json()
-
-playlistId = response['items'][0]['id']
+playlistId = 'UUgv4dPk_qZNAbUW9WkuLPSA'
 
 endpoint = 'https://www.googleapis.com/youtube/v3/playlistItems'
 parts = [
@@ -48,20 +41,20 @@ parts = [
     #'contentDetails'
 ]
 
-params = {
-    'playlistId': playlistId,
-    'part': parts,
-    'maxResults': 50,
-    'pageToken': ''
-}
-
 videos = []
 
+pageToken = ''
 morePages = True
 
 while morePages:
-
-    response = requests.get(endpoint, params=params, headers=auth).json()
+    
+    service = build('youtube', 'v3', credentials=creds)
+    response = service.playlistItems().list(
+        part=parts,
+        playlistId=playlistId,
+        maxResults=50,
+        pageToken=pageToken
+    ).execute()
 
     video = {}
     for item in response['items']:
@@ -75,32 +68,37 @@ while morePages:
         videos.append(video)
 
     if 'nextPageToken' in response.keys():
-        params['pageToken'] = response['nextPageToken']
+        pageToken = response['nextPageToken']
         morePages = True
     else:
         morePages = False
 
-endpoint = 'https://youtubeanalytics.googleapis.com/v2/reports'
 channelId = 'UCgv4dPk_qZNAbUW9WkuLPSA'
-
 metrics = [
     'views',
     'estimatedAdRevenue'
 ]
 
+today = datetime.date.today()
+last_month_today = today.replace(month=today.month-1)
+endDate = last_month_today.replace(day=1) - datetime.timedelta(days=2)
+startDate = endDate.replace(day=1)
+month = endDate.strftime("%B")
+year = endDate.strftime("%Y")
+
 chunkedVideos = [videos[i:i+200] for i in range(0, len(videos), 200)]
 
 for chunk in chunkedVideos:
-    params = {
-        'ids': 'channel=={0}'.format(channelId),
-        'metrics': ','.join(metrics),
-        'dimensions': 'video',
-        'startDate': '2021-12-01',
-        'endDate': '2021-12-31',
-        'filters': 'video=={0}'.format(','.join([video['Id'] for video in chunk])),
-    }
 
-    response = requests.get(endpoint, params=params, headers=auth).json()
+    service = build('youtubeAnalytics', 'v2', credentials=creds)
+    response = service.reports().query(
+        ids='channel=={0}'.format(channelId),
+        metrics=','.join(metrics),
+        dimensions='video',
+        startDate=startDate,
+        endDate=endDate,
+        filters='video=={0}'.format(','.join([video['Id'] for video in chunk])),
+    ).execute()
 
     for row in response['rows']:
         id = row[0]
@@ -126,38 +124,42 @@ summary['Editor'] = editors
 summary['Editor Cut'] = summary['Editor Cut'].index+2
 summary['Editor Cut'] = summary['Editor Cut'].apply(lambda x: "=SUMIF('Video List'!$E:E, $A{0}, 'Video List'!$D:$D)".format(x))
 
-
-writer = pd.ExcelWriter('output.xlsx', engine='xlsxwriter')
+filename = 'Ad_Revenue_{0}_{1}.xlsx'.format(month, year)
+writer = pd.ExcelWriter(filename, engine='xlsxwriter')
 centered_format = writer.book.add_format({'align': 'center', 'valign': 'vcenter'})
+money_format = writer.book.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': '$#,##0.00'})
 
 summary.to_excel(writer, sheet_name='Summary', index=False)
 worksheet = writer.sheets['Summary']
 worksheet.set_column('A:A', 20, centered_format)
-worksheet.set_column('B:B', 20, centered_format)
+worksheet.set_column('B:B', 20, money_format)
 
 
 output.to_excel(writer, sheet_name='Video List', index=False)
 worksheet = writer.sheets['Video List']
 
 for index, column in enumerate(output.columns):
-    #worksheet.set_column(index, index, 20, centered_format)
     series = output[column]
     max_length = max((
         series.astype(str).map(len).max(),  # len of largest item
         len(str(series.name))  # len of column name/header
     ))
+
     if index == 1:
         max_length += 2
-    if index == 0:
+    
+    if index == 0 or index == 4:
         worksheet.set_column(index, index, max_length, centered_format)
+    elif index == 2 or index == 3:
+        worksheet.set_column(index, index, max_length, money_format)
     else:    
         worksheet.set_column(index, index, max_length)
 
-#worksheet.set_column(0, 0, 50, centered_format)
-
-
-#summary.to_excel(writer, sheet_name='Summary', index=False)
-#output.to_excel(writer, sheet_name='Video List', index=False)
-
 writer.save()
 
+try:
+    uploader.upload(filename)
+    print('Finished uploading {0}!'.format(filename))
+except Exception as e:
+    print('Error uploading {0}!'.format(filename))
+    print(e)
