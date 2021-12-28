@@ -56,16 +56,16 @@ while morePages:
         pageToken=pageToken
     ).execute()
 
-    video = {}
+    requestVideo = {}
     for item in response['items']:
 
-        video = {
+        requestVideo = {
             'Id': item['snippet']['resourceId']['videoId'],
             'Title': item['snippet']['title'],
             'Published At': item['snippet']['publishedAt']
         }
 
-        videos.append(video)
+        videos.append(requestVideo)
 
     if 'nextPageToken' in response.keys():
         pageToken = response['nextPageToken']
@@ -81,45 +81,52 @@ metrics = [
 
 today = datetime.date.today()
 last_month_today = today.replace(month=today.month-1)
-endDate = last_month_today.replace(day=1) - datetime.timedelta(days=2)
-startDate = endDate.replace(day=1)
-month = endDate.strftime("%B")
-year = endDate.strftime("%Y")
+endOfMonth = last_month_today.replace(day=1) - datetime.timedelta(days=2)
+startOfMonth = endOfMonth.replace(day=1)
+month = endOfMonth.strftime("%B")
+year = endOfMonth.strftime("%Y")
 
-chunkedVideos = [videos[i:i+200] for i in range(0, len(videos), 200)]
+for requestVideo in videos[:]:
 
-for chunk in chunkedVideos:
+    videoUploadDate = datetime.datetime.strptime(requestVideo['Published At'], "%Y-%m-%dT%H:%M:%S%z").date()
+    thirtyDayCutoff = videoUploadDate + datetime.timedelta(days=30)
+
+    if videoUploadDate < startOfMonth or videoUploadDate > endOfMonth:
+        videos.remove(requestVideo)
+        continue
 
     service = build('youtubeAnalytics', 'v2', credentials=creds)
     response = service.reports().query(
         ids='channel=={0}'.format(channelId),
         metrics=','.join(metrics),
         dimensions='video',
-        startDate=startDate,
-        endDate=endDate,
-        filters='video=={0}'.format(','.join([video['Id'] for video in chunk])),
+        startDate=videoUploadDate,
+        endDate=thirtyDayCutoff,
+        filters='video=={0}'.format(requestVideo['Id']),
     ).execute()
 
-    for row in response['rows']:
-        id = row[0]
-        views = row[1]
-        estimatedAdRevenue = row[2]
+    responseValues = response['rows']
 
-        for video in videos:
-            if video['Id'] == id:
-                video['Views'] = views
-                video['Estimated Ad Revenue'] = estimatedAdRevenue
+    if (len(responseValues) > 0):
+        id = responseValues[0][0]
+        views = responseValues[0][1]
+        estimatedAdRevenue = responseValues[0][2]
+
+        requestVideo['Views'] = views
+        requestVideo['Estimated Ad Revenue'] = estimatedAdRevenue
+        requestVideo['Upload Date'] = videoUploadDate
+        requestVideo['Cutoff Date'] = thirtyDayCutoff
 
 df = pd.DataFrame(videos)
 df['Link'] = df['Id'].apply(lambda x: 'https://www.youtube.com/watch?v={0}'.format(x))
 df['Editor Cut'] = df['Estimated Ad Revenue'].apply(lambda x: x / 10)
 
-output = df[['Title', 'Link', 'Estimated Ad Revenue', 'Editor Cut']].copy()
+output = df[['Title', 'Link', 'Estimated Ad Revenue', 'Editor Cut', 'Upload Date', 'Cutoff Date']].copy()
 output['Editor'] = ''
 output.drop_duplicates(inplace=True)
 
 summary = pd.DataFrame(columns=['Editor', 'Editor Cut'])
-editors = ['Quack', 'Krohnos']
+editors = ['quack', 'imbryguy', 'zinjo', 'kaage', 'erik', 'connor']
 summary['Editor'] = editors
 summary['Editor Cut'] = summary['Editor Cut'].index+2
 summary['Editor Cut'] = summary['Editor Cut'].apply(lambda x: "=SUMIF('Video List'!$E:E, $A{0}, 'Video List'!$D:$D)".format(x))
@@ -133,7 +140,6 @@ summary.to_excel(writer, sheet_name='Summary', index=False)
 worksheet = writer.sheets['Summary']
 worksheet.set_column('A:A', 20, centered_format)
 worksheet.set_column('B:B', 20, money_format)
-
 
 output.to_excel(writer, sheet_name='Video List', index=False)
 worksheet = writer.sheets['Video List']
