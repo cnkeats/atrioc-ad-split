@@ -13,18 +13,18 @@ def upload(filename):
 
     creds = None
 
-    if path.exists('upload_token.json'):
-        creds = Credentials.from_authorized_user_file('upload_token.json', SCOPES)
+    if path.exists('secrets/upload_token.json'):
+        creds = Credentials.from_authorized_user_file('secrets/upload_token.json', SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
+                'secrets/google_project_credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
         # Save the credentials for the next run
-        with open('upload_token.json', 'w') as token:
+        with open('secrets/upload_token.json', 'w') as token:
             token.write(creds.to_json())
 
     try:

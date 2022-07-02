@@ -19,19 +19,20 @@ SCOPES = [
 ]
 creds = None
 
-creds_file = 'quack_credentials.json'
-#creds_file = 'krohnos_creds.json'
+creds_file = 'secrets/quack_credentials.json'
+creds_file = 'secrets/krohnos_creds.json'
 
 if path.exists(creds_file):
     creds = Credentials.from_authorized_user_file(creds_file, SCOPES)
 
-if not creds or not creds.valid:
-    if creds and creds.expired and creds.refresh_token:
-        print('refreshing')
+if (not creds or not creds.valid) or True:
+    if (creds and creds.expired and creds.refresh_token) or True:
+        print('refreshing creds')
         creds.refresh(Request())
     else:
+        print('existing creds')
         flow = InstalledAppFlow.from_client_secrets_file(
-            'google_project_credentials.json', SCOPES)
+            'secrets/google_project_credentials.json', SCOPES)
         #creds = flow.run_local_server(port=0)
         creds = flow.run_console()
     # Save the credentials for the next run
@@ -40,12 +41,12 @@ if not creds or not creds.valid:
     
 
 playlistId = 'UUgv4dPk_qZNAbUW9WkuLPSA' # main
-#playlistId = 'UUdBXOyqr8cDshsp7kcKDAkg' # clips
+playlistId = 'UUdBXOyqr8cDshsp7kcKDAkg' # clips
 
 endpoint = 'https://www.googleapis.com/youtube/v3/playlistItems'
 parts = [
     'snippet',
-    #'contentDetails'
+    'contentDetails'
 ]
 
 videos = []
@@ -69,8 +70,19 @@ while morePages:
         requestVideo = {
             'Id': item['snippet']['resourceId']['videoId'],
             'Title': item['snippet']['title'],
-            'Published At': item['snippet']['publishedAt']
+            'Published At': item['snippet']['publishedAt'],
         }
+
+        try: 
+            requestVideo['Editor'] = item['snippet']['description'].split('Edited by')[1].split('|')[0].strip().lower()
+            requestVideo['Editor'] = requestVideo['Editor'] = '' if requestVideo['Editor'] == '[name]' else requestVideo['Editor']
+        except:
+            requestVideo['Editor'] = ''
+            #print(item['snippet']['description'])
+        
+        #requestVideo['Editor'] = input()
+
+        #input()
 
         videos.append(requestVideo)
 
@@ -81,21 +93,23 @@ while morePages:
         morePages = False
 
 
-
-channelId = 'UCgv4dPk_qZNAbUW9WkuLPSA' # main
-#channelId = 'UCdBXOyqr8cDshsp7kcKDAkg' # clips
+#channelId = 'UCgv4dPk_qZNAbUW9WkuLPSA' # main
+channelId = 'UCdBXOyqr8cDshsp7kcKDAkg' # clips
 
 metrics = [
     'views',
     'estimatedRevenue',
 ]
 
-today = datetime.date.today() + datetime.timedelta(days=1)
-last_month_today = today.replace(month=today.month-1)
+today = datetime.date.today() + datetime.timedelta(days=31)
+last_month_today = today.replace(month=today.month-2)
 endOfMonth = last_month_today.replace(day=1) - datetime.timedelta(days=1)
 startOfMonth = endOfMonth.replace(day=1)
 month = endOfMonth.strftime("%B")
 year = endOfMonth.strftime("%Y")
+
+
+editors = []
 
 for video in videos[:]:
 
@@ -113,69 +127,56 @@ for video in videos[:]:
     video['Cutoff Date'] = thirtyDayCutoff
 
 
+    print(video)
+    #input()
+
+    if video['Editor'] not in editors and video['Editor'] != '':
+        editors.append(video['Editor'])
+
+
 print('{0} videos found'.format(len(videos)))
+
+
+#[print(video['Id']) for video in videos]
+#exit()
+
 
 
 print('getting videos from {0} to {1}'.format(startOfMonth, endOfMonth))
 
-for requestVideo in videos[:]:
 
-    videoUploadDate = datetime.datetime.strptime(requestVideo['Published At'], "%Y-%m-%dT%H:%M:%S%z") + datetime.timedelta(days=-1)
-    thirtyDayCutoff = videoUploadDate + datetime.timedelta(days=30)
-
-    #print(videoUploadDate)
-    #print(thirtyDayCutoff)
-
-    if videoUploadDate.date() < startOfMonth or videoUploadDate.date() > endOfMonth:
-        videos.remove(requestVideo)
-        continue
-
-    service = build('youtubeAnalytics', 'v2', credentials=creds)
-    response = service.reports().query(
-        ids='channel=={0}'.format(channelId),
-        metrics=','.join(metrics),
-        dimensions='video',
-        startDate=videoUploadDate.date(),
-        endDate=thirtyDayCutoff.date(),
-        filters='video=={0}'.format(requestVideo['Id']),
-    ).execute()
-
-    responseValues = response['rows']
-
-    if (len(responseValues) > 0):
-        id = responseValues[0][0]
-        views = responseValues[0][1]
-        estimatedRevenue = responseValues[0][2]
-
-        #print(responseValues[0])
-
-        requestVideo['Views'] = views
-        requestVideo['Estimated Revenue'] = estimatedRevenue
-        requestVideo['Upload Date'] = videoUploadDate
-        requestVideo['Cutoff Date'] = thirtyDayCutoff
-    #print(requestVideo)
-    print('day {0} - ${1}'.format(30, estimatedRevenue))
-    #input()
 
 
 df = pd.DataFrame(videos)
+print(df)
 df['Link'] = df['Id'].apply(lambda x: 'https://www.youtube.com/watch?v={0}'.format(x))
-df['Editor Cut'] = df['Estimated Revenue'].apply(lambda x: x / 10)
+#df['Editor Cut'] = df['Estimated Revenue'].apply(lambda x: x / 10)
+df['Estimated Revenue'] = -99999
+df['Editor Cut'] = 0
 df['Upload Date'] = df['Upload Date'].apply(lambda x: x.strftime("%Y-%m-%d"))
 df['Cutoff Date'] = df['Cutoff Date'].apply(lambda x: x.strftime("%Y-%m-%d"))
+#df['Verify'] = '=HYPERLINK("https://studio.youtube.com/video/{0}/analytics/tab-earn_revenue/period-default?c=UCdBXOyqr8cDshsp7kcKDAkg", "Link")'.format(df['Id'])
+df['Verify'] = df['Id'].apply(lambda x: 'https://studio.youtube.com/video/{0}/analytics/tab-earn_revenue/period-default?c={1}'.format(x, channelId))
+df['Verify'] = df['Verify'].apply(lambda x: '=HYPERLINK("{0}", "Link")'.format(x))
+
+print(df)
 
 output = df[['Title', 'Link', 'Estimated Revenue', 'Editor Cut', 'Upload Date', 'Cutoff Date']].copy()
-output['Editor'] = ''
+output['Editor'] = df['Editor']
+output['Verify'] = df['Verify']
 output.drop_duplicates(inplace=True)
 
 summary = pd.DataFrame(columns=['Editor', 'Editor Cut'])
-editors = ['quack', 'imbryguy', 'zinjo', 'kaage', 'erik', 'connor']
+#editors = ['quack', 'imbryguy', 'zinjo', 'kaage', 'erik', 'connor']
 summary['Editor'] = editors
 summary['Editor Cut'] = summary['Editor Cut'].index+2
 summary['Editor Cut'] = summary['Editor Cut'].apply(lambda x: "=SUMIF('Video List'!$G:G, $A{0}, 'Video List'!$D:$D)".format(x))
 
-filename = 'output/temp_{0}_{1}.xlsx'.format(month, year)
-#filename = 'clip_test_{0}_{1}.xlsx'.format(month, year)
+#filename = 'output/temp_{0}_{1}.xlsx'.format(month, year)
+#filename = 'output/clip_test_{0}_{1}.xlsx'.format(month, year)
+#filename = 'dev/Clip_Revenue_{0}_{1}.xlsx'.format(month, year)
+filename = 'dev/Editor_Revenue_{0}_{1}.xlsx'.format(month, year)
+
 writer = pd.ExcelWriter(filename, engine='xlsxwriter')
 centered_format = writer.book.add_format({'align': 'center', 'valign': 'vcenter'})
 money_format = writer.book.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': '$#,##0.00'})
@@ -204,6 +205,7 @@ for index, column in enumerate(output.columns):
         worksheet.set_column(index, index, max_length, money_format)
     else:    
         worksheet.set_column(index, index, max_length)
+worksheet.set_column('H:H', 20, centered_format)
 
 writer.save()
 
