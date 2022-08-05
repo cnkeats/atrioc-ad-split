@@ -20,12 +20,12 @@ SCOPES = [
 creds = None
 
 creds_file = 'secrets/quack_credentials.json'
-creds_file = 'secrets/krohnos_creds.json'
+#creds_file = 'secrets/krohnos_creds.json'
 
 if path.exists(creds_file):
     creds = Credentials.from_authorized_user_file(creds_file, SCOPES)
 
-if (not creds or not creds.valid) or True:
+if (not creds or not creds.valid):
     if (creds and creds.expired and creds.refresh_token) or True:
         print('refreshing creds')
         creds.refresh(Request())
@@ -41,7 +41,7 @@ if (not creds or not creds.valid) or True:
     
 
 playlistId = 'UUgv4dPk_qZNAbUW9WkuLPSA' # main
-playlistId = 'UUdBXOyqr8cDshsp7kcKDAkg' # clips
+#playlistId = 'UUdBXOyqr8cDshsp7kcKDAkg' # clips
 
 endpoint = 'https://www.googleapis.com/youtube/v3/playlistItems'
 parts = [
@@ -73,6 +73,9 @@ while morePages:
             'Published At': item['snippet']['publishedAt'],
         }
 
+        #print(item)
+        #input()
+
         try: 
             requestVideo['Editor'] = item['snippet']['description'].split('Edited by')[1].split('|')[0].strip().lower()
             requestVideo['Editor'] = requestVideo['Editor'] = '' if requestVideo['Editor'] == '[name]' else requestVideo['Editor']
@@ -93,8 +96,8 @@ while morePages:
         morePages = False
 
 
-#channelId = 'UCgv4dPk_qZNAbUW9WkuLPSA' # main
-channelId = 'UCdBXOyqr8cDshsp7kcKDAkg' # clips
+channelId = 'UCgv4dPk_qZNAbUW9WkuLPSA' # main
+#channelId = 'UCdBXOyqr8cDshsp7kcKDAkg' # clips
 
 metrics = [
     'views',
@@ -127,9 +130,6 @@ for video in videos[:]:
     video['Cutoff Date'] = thirtyDayCutoff
 
 
-    print(video)
-    #input()
-
     if video['Editor'] not in editors and video['Editor'] != '':
         editors.append(video['Editor'])
 
@@ -147,12 +147,116 @@ print('getting videos from {0} to {1}'.format(startOfMonth, endOfMonth))
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+for requestVideo in videos[:]:
+
+    videoUploadDate = datetime.datetime.strptime(requestVideo['Published At'], "%Y-%m-%dT%H:%M:%S%z") + datetime.timedelta(days=-1)
+    thirtyDayCutoff = videoUploadDate + datetime.timedelta(days=30)
+
+    #print(videoUploadDate)
+    #print(thirtyDayCutoff)
+
+    if videoUploadDate.date() < startOfMonth or videoUploadDate.date() > endOfMonth:
+        videos.remove(requestVideo)
+        continue
+
+    service = build('youtubeAnalytics', 'v2', credentials=creds)
+    response = service.reports().query(
+        ids='channel=={0}'.format(channelId),
+        metrics=','.join(metrics),
+        dimensions='video',
+        startDate=videoUploadDate.date(),
+        endDate=thirtyDayCutoff.date(),
+        filters='video=={0}'.format(requestVideo['Id']),
+    ).execute()
+
+    responseValues = response['rows']
+
+    if (len(responseValues) > 0):
+        id = responseValues[0][0]
+        views = responseValues[0][1]
+        estimatedRevenue = responseValues[0][2]
+
+        print(responseValues[0])
+
+        requestVideo['Views'] = views
+        requestVideo['Estimated Revenue'] = estimatedRevenue
+        requestVideo['Upload Date'] = videoUploadDate
+        requestVideo['Cutoff Date'] = thirtyDayCutoff
+    #print(requestVideo)
+    #print('day {0} - ${1}'.format(30, estimatedRevenue))
+    #input()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 df = pd.DataFrame(videos)
 print(df)
 df['Link'] = df['Id'].apply(lambda x: 'https://www.youtube.com/watch?v={0}'.format(x))
-#df['Editor Cut'] = df['Estimated Revenue'].apply(lambda x: x / 10)
-df['Estimated Revenue'] = -99999
-df['Editor Cut'] = 0
+df['Editor Cut'] = df['Estimated Revenue'].apply(lambda x: x / 10)
+#df['Estimated Revenue'] = -99999
+#df['Editor Cut'] = 0
 df['Upload Date'] = df['Upload Date'].apply(lambda x: x.strftime("%Y-%m-%d"))
 df['Cutoff Date'] = df['Cutoff Date'].apply(lambda x: x.strftime("%Y-%m-%d"))
 #df['Verify'] = '=HYPERLINK("https://studio.youtube.com/video/{0}/analytics/tab-earn_revenue/period-default?c=UCdBXOyqr8cDshsp7kcKDAkg", "Link")'.format(df['Id'])
@@ -207,7 +311,7 @@ for index, column in enumerate(output.columns):
         worksheet.set_column(index, index, max_length)
 worksheet.set_column('H:H', 20, centered_format)
 
-writer.save()
+#writer.save()
 
 try:
     #uploader.upload(filename)
